@@ -29,7 +29,7 @@ from ..exceptions import (
 from ..fork_types import StateGas, StateGasPerByte, VersionedHash
 from ..transactions import (
     TX_MAX_GAS_LIMIT,
-    BlobTransaction,
+    BlobCapableTransaction,
     IntrinsicGasCost,
     Transaction,
 )
@@ -161,16 +161,16 @@ class GasCosts:
     """
     Base gas cost for [`FrameTransaction`][ftx]s.
 
-    [ftx]: ref:ethereum.forks.amsterdam.transactions.FrameTransaction
-    """
+    [ftx]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameTransaction
+    """  # noqa: E501
 
     TX_PER_FRAME: Final[Uint] = Uint(475)
     """
     Additional per-[`Frame`] gas cost for [`FrameTransaction`][ftx]s.
 
-    [ftx]: ref:ethereum.forks.amsterdam.transactions.FrameTransaction
-    [`Frame`]: ref:ethereum.forks.amsterdam.transactions.Frame
-    """
+    [ftx]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameTransaction
+    [`Frame`]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.Frame
+    """  # noqa: E501
 
     # Frames
     FRAME_SIGNATURE_SCHEME_SECP256K1: Final[Uint] = Uint(2800)
@@ -178,17 +178,28 @@ class GasCosts:
     Cost for verifying a [`SECP256K1`][s] signature in a
     [`FrameTransaction`][ftx].
 
-    [s]: ref:ethereum.forks.amsterdam.transactions.FrameSignatureScheme.SECP256K1
-    [ftx]: ref:ethereum.forks.amsterdam.transactions.FrameTransaction
+    [s]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameSignatureScheme.SECP256K1
+    [ftx]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameTransaction
     """  # noqa: E501
 
     FRAME_SIGNATURE_SCHEME_P256: Final[Uint] = Uint(6700)
     """
     Cost for verifying a [`P256`][s] signature in a [`FrameTransaction`][ftx].
 
-    [s]: ref:ethereum.forks.amsterdam.transactions.FrameSignatureScheme.P256
-    [ftx]: ref:ethereum.forks.amsterdam.transactions.FrameTransaction
+    [s]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameSignatureScheme.P256
+    [ftx]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameTransaction
+    """  # noqa: E501
+
+    FRAME_SIGNATURE_SCHEME_ARBITRARY: Final[Uint] = Uint(100)
     """
+    Cost charged for an [`ARBITRARY`][s] signature entry in a
+    [`FrameTransaction`][ftx]. The protocol does not cryptographically
+    validate these entries; the charge covers making the bytes available
+    for introspection.
+
+    [s]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameSignatureScheme.ARBITRARY
+    [ftx]: ref:ethereum.forks.amsterdam.transactions.frame_transaction.FrameTransaction
+    """  # noqa: E501
 
     # Block
     LIMIT_ADJUSTMENT_FACTOR: Final[Uint] = Uint(1024)
@@ -256,8 +267,14 @@ class GasCosts:
     OPCODE_EXCHANGE: Final[Uint] = VERY_LOW
     OPCODE_TLOAD: Final[Uint] = Uint(100)
     OPCODE_TSTORE: Final[Uint] = Uint(100)
+    OPCODE_TXPARAM: Final[Uint] = BASE
+    OPCODE_FRAMEDATALOAD: Final[Uint] = VERY_LOW
+    OPCODE_FRAMEPARAM: Final[Uint] = BASE
+    OPCODE_SIGPARAM: Final[Uint] = BASE
 
     # Dynamic Opcode Components
+    OPCODE_FRAMEDATACOPY_BASE: Final[Uint] = VERY_LOW
+    OPCODE_SIGPARAM_COPY_BASE: Final[Uint] = VERY_LOW
     OPCODE_RETURNDATACOPY_BASE: Final[Uint] = VERY_LOW
     OPCODE_RETURNDATACOPY_PER_WORD: Final[Uint] = Uint(3)
     OPCODE_CALLDATACOPY_BASE: Final[Uint] = VERY_LOW
@@ -933,7 +950,7 @@ def calculate_total_blob_gas(tx: Transaction) -> U64:
         The total blob gas for the transaction.
 
     """
-    if isinstance(tx, BlobTransaction):
+    if isinstance(tx, BlobCapableTransaction):
         return GasCosts.PER_BLOB * U64(len(tx.blob_versioned_hashes))
     else:
         return U64(0)
