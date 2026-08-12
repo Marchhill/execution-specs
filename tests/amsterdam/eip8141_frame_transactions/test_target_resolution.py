@@ -13,10 +13,8 @@ from execution_testing import (
     Account,
     Address,
     Alloc,
-    Bytes,
     Fork,
     FrameReceipt,
-    FrameSignature,
     Op,
     StateTestFiller,
     Transaction,
@@ -150,26 +148,19 @@ def test_verify_frame_precompile_target(
     precompile: the target's empty code hash routes the frame to the
     default code, which reverts because no signature entry can resolve
     to a precompile address.
+
+    The first frame approves both execution and payment, so the
+    approvals do not depend on the frame under test. Dispatching the
+    precompile instead would leave every approval in place and make the
+    transaction valid, rather than rejecting it for a missing approval.
     """
     sender = pre.fund_eoa()
-    payer = pre.fund_eoa()
 
     tx = Transaction(
         sender=sender,
         frames=[
-            verify_frame(flags=Spec.APPROVE_EXECUTION),
-            verify_frame(flags=Spec.APPROVE_PAYMENT, target=IDENTITY),
-        ],
-        signatures=[
-            FrameSignature(
-                scheme=Spec.SCHEME_SECP256K1,
-                signer=Bytes(sender),
-            ),
-            FrameSignature(
-                scheme=Spec.SCHEME_SECP256K1,
-                signer=Bytes(payer),
-                secret_key=payer.key,
-            ),
+            verify_frame(),
+            verify_frame(flags=Spec.APPROVE_NONE, target=IDENTITY),
         ],
         error=TransactionException.TYPE_6_INVALID_FRAME_EXECUTION,
     )
@@ -254,6 +245,48 @@ def test_delegated_to_precompile_target(
         frames=[
             verify_frame(),
             default_frame(target=authority, data=b"\x01" * 32),
+        ],
+        expected_receipt=TransactionReceipt(
+            payer=sender,
+            frame_receipts=[
+                FrameReceipt(status=Spec.STATUS_SUCCESS, gas_used=0),
+                FrameReceipt(
+                    status=Spec.STATUS_SUCCESS,
+                    gas_used=gas_costs.COLD_ACCOUNT_ACCESS
+                    + gas_costs.WARM_ACCESS,
+                ),
+            ],
+        ),
+    )
+
+    state_test(pre=pre, tx=tx, post={sender: Account(nonce=1)})
+
+
+def test_verify_frame_delegated_to_precompile_target(
+    state_test: StateTestFiller,
+    pre: Alloc,
+    fork: Fork,
+) -> None:
+    """
+    Follow the designation of a `VERIFY` frame's delegated target
+    rather than running the default code: the resolved code is empty,
+    as it is for the codeless target that does route to the default
+    code, but the target itself holds a designation and so is not
+    codeless.
+
+    Deciding the default code from the resolved code hash instead would
+    run it here, revert for want of a signature entry resolving to the
+    target, and reject the transaction.
+    """
+    gas_costs = fork.gas_costs()
+    sender = pre.fund_eoa()
+    authority = pre.fund_eoa(delegation=IDENTITY)
+
+    tx = Transaction(
+        sender=sender,
+        frames=[
+            verify_frame(),
+            verify_frame(flags=Spec.APPROVE_NONE, target=authority),
         ],
         expected_receipt=TransactionReceipt(
             payer=sender,
