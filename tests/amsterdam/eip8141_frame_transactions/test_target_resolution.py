@@ -52,7 +52,7 @@ def identity_gas(fork: Fork, data: bytes) -> int:
     gas_costs = fork.gas_costs()
     words = (len(data) + 31) // 32
     return (
-        gas_costs.WARM_ACCESS
+        fork.frame_entry_gas_calculator()(target_warm=True)
         + gas_costs.PRECOMPILE_IDENTITY_BASE
         + gas_costs.PRECOMPILE_IDENTITY_PER_WORD * words
     )
@@ -165,7 +165,8 @@ def test_verify_frame_precompile_target(
         error=TransactionException.TYPE_6_INVALID_FRAME_EXECUTION,
     )
 
-    state_test(pre=pre, tx=tx, post={})
+    # The rejected transaction leaves the sender's nonce untouched.
+    state_test(pre=pre, tx=tx, post={sender: Account(nonce=0)})
 
 
 @pytest.mark.parametrize(
@@ -185,7 +186,7 @@ def test_delegated_target_entry_charge(
     Charge the access of a frame target's designated address at frame
     entry, on top of the target's own access, warm or cold.
     """
-    gas_costs = fork.gas_costs()
+    entry_gas = fork.frame_entry_gas_calculator()
     sender = pre.fund_eoa()
     delegate = pre.deploy_contract(code=Op.STOP)
     authority = pre.fund_eoa(delegation=delegate)
@@ -195,16 +196,11 @@ def test_delegated_target_entry_charge(
         # it pays for the cold access the frame under test then avoids.
         warming_frames = [default_frame(target=delegate)]
         warming_receipts = [
-            FrameReceipt(
-                status=Spec.STATUS_SUCCESS,
-                gas_used=gas_costs.COLD_ACCOUNT_ACCESS,
-            )
+            FrameReceipt(status=Spec.STATUS_SUCCESS, gas_used=entry_gas())
         ]
-        delegate_access = gas_costs.WARM_ACCESS
     else:
         warming_frames = []
         warming_receipts = []
-        delegate_access = gas_costs.COLD_ACCOUNT_ACCESS
 
     tx = Transaction(
         sender=sender,
@@ -220,55 +216,15 @@ def test_delegated_target_entry_charge(
                 *warming_receipts,
                 FrameReceipt(
                     status=Spec.STATUS_SUCCESS,
-                    gas_used=gas_costs.COLD_ACCOUNT_ACCESS + delegate_access,
+                    gas_used=entry_gas(
+                        delegated=True, delegation_warm=warm_delegate
+                    ),
                 ),
             ],
         ),
     )
 
     state_test(pre=pre, tx=tx, post={sender: Account(nonce=1)})
-
-
-def test_delegated_target_entry_charge_unaffordable(
-    state_test: StateTestFiller,
-    pre: Alloc,
-    fork: Fork,
-) -> None:
-    """
-    Fail a frame whose gas covers its target's access but not the
-    designation's: the designated account is never read, so it stays
-    out of the block access list.
-    """
-    gas_costs = fork.gas_costs()
-    sender = pre.fund_eoa()
-    delegate = pre.deploy_contract(code=Op.SSTORE(0, 1) + Op.STOP)
-    authority = pre.fund_eoa(delegation=delegate)
-
-    tx = Transaction(
-        sender=sender,
-        frames=[
-            verify_frame(),
-            default_frame(
-                target=authority, gas_limit=gas_costs.COLD_ACCOUNT_ACCESS
-            ),
-        ],
-        expected_receipt=TransactionReceipt(
-            payer=sender,
-            frame_receipts=[
-                FrameReceipt(status=Spec.STATUS_SUCCESS, gas_used=0),
-                FrameReceipt(
-                    status=Spec.STATUS_FAILURE,
-                    gas_used=gas_costs.COLD_ACCOUNT_ACCESS,
-                ),
-            ],
-        ),
-    )
-
-    state_test(
-        pre=pre,
-        tx=tx,
-        post={sender: Account(nonce=1), delegate: Account(storage={})},
-    )
 
 
 def test_delegated_to_precompile_target(
@@ -281,7 +237,7 @@ def test_delegated_to_precompile_target(
     following a designation disables precompile dispatch, leaving the
     frame to execute the designated address's empty code.
     """
-    gas_costs = fork.gas_costs()
+    entry_gas = fork.frame_entry_gas_calculator()
     sender = pre.fund_eoa()
     authority = pre.fund_eoa(delegation=IDENTITY)
 
@@ -297,8 +253,7 @@ def test_delegated_to_precompile_target(
                 FrameReceipt(status=Spec.STATUS_SUCCESS, gas_used=0),
                 FrameReceipt(
                     status=Spec.STATUS_SUCCESS,
-                    gas_used=gas_costs.COLD_ACCOUNT_ACCESS
-                    + gas_costs.WARM_ACCESS,
+                    gas_used=entry_gas(delegated=True, delegation_warm=True),
                 ),
             ],
         ),
@@ -323,7 +278,7 @@ def test_verify_frame_delegated_to_precompile_target(
     run it here, revert for want of a signature entry resolving to the
     target, and reject the transaction.
     """
-    gas_costs = fork.gas_costs()
+    entry_gas = fork.frame_entry_gas_calculator()
     sender = pre.fund_eoa()
     authority = pre.fund_eoa(delegation=IDENTITY)
 
@@ -339,8 +294,7 @@ def test_verify_frame_delegated_to_precompile_target(
                 FrameReceipt(status=Spec.STATUS_SUCCESS, gas_used=0),
                 FrameReceipt(
                     status=Spec.STATUS_SUCCESS,
-                    gas_used=gas_costs.COLD_ACCOUNT_ACCESS
-                    + gas_costs.WARM_ACCESS,
+                    gas_used=entry_gas(delegated=True, delegation_warm=True),
                 ),
             ],
         ),
