@@ -229,6 +229,48 @@ def test_delegated_target_entry_charge(
     state_test(pre=pre, tx=tx, post={sender: Account(nonce=1)})
 
 
+def test_delegated_target_entry_charge_unaffordable(
+    state_test: StateTestFiller,
+    pre: Alloc,
+    fork: Fork,
+) -> None:
+    """
+    Fail a frame whose gas covers its target's access but not the
+    designation's: the designated account is never read, so it stays
+    out of the block access list.
+    """
+    gas_costs = fork.gas_costs()
+    sender = pre.fund_eoa()
+    delegate = pre.deploy_contract(code=Op.SSTORE(0, 1) + Op.STOP)
+    authority = pre.fund_eoa(delegation=delegate)
+
+    tx = Transaction(
+        sender=sender,
+        frames=[
+            verify_frame(),
+            default_frame(
+                target=authority, gas_limit=gas_costs.COLD_ACCOUNT_ACCESS
+            ),
+        ],
+        expected_receipt=TransactionReceipt(
+            payer=sender,
+            frame_receipts=[
+                FrameReceipt(status=Spec.STATUS_SUCCESS, gas_used=0),
+                FrameReceipt(
+                    status=Spec.STATUS_FAILURE,
+                    gas_used=gas_costs.COLD_ACCOUNT_ACCESS,
+                ),
+            ],
+        ),
+    )
+
+    state_test(
+        pre=pre,
+        tx=tx,
+        post={sender: Account(nonce=1), delegate: Account(storage={})},
+    )
+
+
 def test_delegated_to_precompile_target(
     state_test: StateTestFiller,
     pre: Alloc,
