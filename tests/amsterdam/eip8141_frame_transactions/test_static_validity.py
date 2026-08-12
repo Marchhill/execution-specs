@@ -25,6 +25,7 @@ from execution_testing import (
     StateTestFiller,
     Transaction,
     TransactionException,
+    TransactionTestFiller,
     keccak256,
 )
 
@@ -173,6 +174,44 @@ def test_invalid_tx_fields(
         # valid and executes.
         post={sender: Account(nonce=0 if error else 1)},
     )
+
+
+@pytest.mark.parametrize(
+    "max_fee_per_blob_gas,error",
+    [
+        pytest.param(
+            1,
+            TransactionException.TYPE_6_INVALID_FRAME_FORMAT,
+            id="non_zero_blob_fee",
+            marks=pytest.mark.exception_test,
+        ),
+        pytest.param(0, None, id="zero_blob_fee"),
+    ],
+)
+def test_blob_fee_without_blobs(
+    transaction_test: TransactionTestFiller,
+    pre: Alloc,
+    max_fee_per_blob_gas: int,
+    error: Optional[TransactionException],
+) -> None:
+    """
+    Require `max_fee_per_blob_gas == 0` of a frame transaction carrying
+    no blob hashes, per the EIP-8141 Constraints.
+
+    Asserted on the transaction rather than on a block, because a block
+    whose transaction is wrongly accepted is invalid for a second
+    reason — its header commits to the transaction being rejected — and
+    is discarded either way, which leaves the rule itself unpinned.
+    """
+    tx = Transaction(
+        sender=pre.fund_eoa(),
+        frames=[verify_frame()],
+        blob_versioned_hashes=[],
+        max_fee_per_blob_gas=max_fee_per_blob_gas,
+        error=error,
+    )
+
+    transaction_test(pre=pre, tx=tx)
 
 
 FOREIGN_TARGET = Address(0x1234)
