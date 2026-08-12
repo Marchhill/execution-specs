@@ -190,12 +190,21 @@ def test_delegated_target_entry_charge(
     delegate = pre.deploy_contract(code=Op.STOP)
     authority = pre.fund_eoa(delegation=delegate)
 
-    warming_frames = [default_frame(target=delegate)] if warm_delegate else []
-    delegate_access = (
-        gas_costs.WARM_ACCESS
-        if warm_delegate
-        else gas_costs.COLD_ACCOUNT_ACCESS
-    )
+    if warm_delegate:
+        # The warming frame accesses the designated address itself, so
+        # it pays for the cold access the frame under test then avoids.
+        warming_frames = [default_frame(target=delegate)]
+        warming_receipts = [
+            FrameReceipt(
+                status=Spec.STATUS_SUCCESS,
+                gas_used=gas_costs.COLD_ACCOUNT_ACCESS,
+            )
+        ]
+        delegate_access = gas_costs.WARM_ACCESS
+    else:
+        warming_frames = []
+        warming_receipts = []
+        delegate_access = gas_costs.COLD_ACCOUNT_ACCESS
 
     tx = Transaction(
         sender=sender,
@@ -208,13 +217,7 @@ def test_delegated_target_entry_charge(
             payer=sender,
             frame_receipts=[
                 FrameReceipt(status=Spec.STATUS_SUCCESS, gas_used=0),
-                *[
-                    FrameReceipt(
-                        status=Spec.STATUS_SUCCESS,
-                        gas_used=gas_costs.COLD_ACCOUNT_ACCESS,
-                    )
-                    for _ in warming_frames
-                ],
+                *warming_receipts,
                 FrameReceipt(
                     status=Spec.STATUS_SUCCESS,
                     gas_used=gas_costs.COLD_ACCOUNT_ACCESS + delegate_access,
